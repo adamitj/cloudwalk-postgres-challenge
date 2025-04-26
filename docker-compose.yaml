@@ -1,0 +1,90 @@
+services:
+  pg_master:
+    container_name: cloudwalk-adamitj-pg-master
+    image: postgres:14
+    user: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: sql
+      POSTGRES_DB: testdb
+    ports:
+      - "5501:5432" # External port 5501 -> Internal port 5432
+    volumes:
+      - pg_master_data:/var/lib/postgresql/data
+      - ./scripts:/scripts
+    networks:
+      - adamitj_postgres_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    entrypoint: >
+      bash -c '
+        # Start database with wal_level=logical
+        docker-entrypoint.sh postgres -c wal_level=logical &
+        
+        # Wait for PostgreSQL to be available
+        until pg_isready -U postgres; do
+          echo "Waiting for PostgreSQL to initialize..."
+          sleep 2
+        done
+        
+        echo "PostgreSQL initialized, executing script..."
+        bash /scripts/pg_migration.sh /scripts/pg_master/db/migration testdb
+
+        # Keep the container running (the background process will continue)
+        wait
+      '
+
+  pg_replica:
+    container_name: cloudwalk-adamitj-pg-replica
+    image: postgres:14
+    user: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: sql
+      POSTGRES_DB: testdb
+    ports:
+      - "5502:5432" # External port 5502 -> Internal port 5432
+    volumes:
+      - pg_replica_data:/var/lib/postgresql/data
+      - ./scripts:/scripts
+    networks:
+      - adamitj_postgres_network
+    depends_on:
+      pg_master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    entrypoint: >
+      bash -c '
+        # Start database with wal_level=logical
+        docker-entrypoint.sh postgres -c wal_level=logical &
+        
+        # Wait for PostgreSQL to be available
+        until pg_isready -U postgres; do
+          echo "Waiting for PostgreSQL to initialize..."
+          sleep 2
+        done
+        
+        echo "PostgreSQL initialized, executing script..."
+        bash /scripts/pg_migration.sh /scripts/pg_replica/db/migration testdb
+
+        # Keep the container running (the background process will continue)
+        wait
+      '
+  
+networks:
+  adamitj_postgres_network:
+    name: adamitj-postgres-network
+
+volumes:
+  pg_master_data:
+    name: adamitj-pg-master-data
+  pg_replica_data:
+    name: adamitj-pg-replica-data
+    
